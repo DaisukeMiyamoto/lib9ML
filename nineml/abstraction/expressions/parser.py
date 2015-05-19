@@ -4,6 +4,7 @@ import sympy
 from sympy.parsing.sympy_parser import (
     parse_expr as sympy_parse, standard_transformations, convert_xor)
 from sympy.parsing.sympy_tokenize import NAME, OP
+from sympy.functions.elementary.piecewise import Piecewise, ExprCondPair
 import operator
 import re
 from nineml.exceptions import NineMLMathParseError
@@ -41,14 +42,11 @@ class Parser(object):
                 self._check_valid_funcs(expr)
             elif isinstance(expr, basestring):
                 try:
-                    expr = self.escape_random_namespace(expr)
-                    expr = sympy_parse(
-                        expr, transformations=[self] + self._sympy_transforms,
-                        local_dict=self.inline_randoms_dict)
-                    # TODO: Could perform a second pass parse and assume all
-                    #       symbols to be real (not sure it is necessary
-                    #       though)
-                    expr = self._postprocess(expr)
+                    # Check to see whether expression contains a ternary op.
+                    if '?' in expr:
+                        return Piecewise(self._split_into_piecies(expr))
+                    else:
+                        return self._parse_subexpr(expr)
                 except Exception, e:
                     raise NineMLMathParseError(
                         "Could not parse math-inline expression: {}\n\n{}"
@@ -58,6 +56,16 @@ class Parser(object):
                                 " SymPy expression".format(repr(expr),
                                                            type(expr)))
         return expr
+
+    def _parse_subexpr(self, expr):
+        expr = self.escape_random_namespace(expr)
+        expr = sympy_parse(
+            expr, transformations=([self] + self._sympy_transforms),
+            local_dict=self.inline_randoms_dict)
+        # TODO: Could perform a second pass parse and assume all
+        #       symbols to be real (not sure it is necessary
+        #       though)          
+        return self._postprocess(expr)    
 
     def _preprocess(self, tokens):
         """
@@ -171,4 +179,4 @@ class Parser(object):
 
     @classmethod
     def inline_random_distributions(cls):
-        return cls.inline_randoms_dict.itervalues()
+        return cls.inline_randoms_dict.itervalues()  
