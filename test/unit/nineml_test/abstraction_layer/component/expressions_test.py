@@ -196,6 +196,82 @@ class AnsiC89ToSympy_test(unittest.TestCase):
                                 (self.j, True)))
 
 
+class SympyToC89_test(unittest.TestCase):
+
+    def setUp(self):
+        self.a = sympy.Symbol('a')
+        self.b = sympy.Symbol('b')
+        self.c = sympy.Symbol('c')
+        self.d = sympy.Symbol('d')
+        self.e = sympy.Symbol('e')
+        self.f = sympy.Symbol('f')
+        self.g = sympy.Symbol('g')
+        self.h = sympy.Symbol('h')
+        self.i = sympy.Symbol('i')
+        self.j = sympy.Symbol('j')
+
+    def test_logical_and(self):
+        expr = Expression(sympy.And(self.a, self.b))
+        self.assertEqual(expr.rhs_cstr, 'a && b')
+
+    def test_logical_or(self):
+        expr = Expression(sympy.Or(self.a, self.b))
+        self.assertEqual(expr.rhs_cstr, 'a || b')
+
+    def test_equality(self):
+        expr = Expression(sympy.Eq(self.a, self.b))
+        self.assertEqual(expr.rhs_cstr, 'a == b')
+
+    def test_equality_combined(self):
+        expr = Expression(sympy.Or(sympy.And(sympy.Eq(self.a, self.b),
+                                             sympy.Eq(self.c, self.d)),
+                                   sympy.Eq(self.e, self.f)))
+        self.assertEqual(expr.rhs_cstr, 'a == b && c == d || e == f')
+
+    def test_nested_relational(self):
+        expr = Expression(sympy.And(sympy.Or(sympy.Eq(self.a, self.b),
+                                             sympy.Eq(self.c, self.d)),
+                                    sympy.Or(sympy.Eq(self.e, self.f),
+                                             sympy.Lt(self.g, self.f))))
+        self.assertEqual(
+            expr.rhs_cstr, '(a == b || c == d) && (e == f || g < f)')
+
+    def test_pow(self):
+        expr = Expression(self.a ** self.b)
+        self.assertEqual(expr.rhs_cstr, 'pow(a, b)')
+
+    def test_negation(self):
+        expr = Expression(sympy.Not(self.a))
+        self.assertEqual(expr.rhs_cstr, '!a')
+
+    def test_ternary_simple(self):
+        expr = Expression(Piecewise((self.c, sympy.Lt(self.a, self.b)),
+                                    (self.d, True)))
+        self.assertEqual(expr.rhs_cstr, '((a < b) ? (\n   c\n)\n: (\n   d\n))')
+
+    def test_ternary_nested(self):
+        expr = Expression(Piecewise((self.c, sympy.Lt(self.a, self.b)),
+                                    (self.f, sympy.Gt(self.d, self.e)),
+                                    (self.i, sympy.Eq(self.g, self.h)),
+                                    (self.j, True)))
+        self.assertEqual(
+            expr.rhs_cstr, ('((a < b) ? (\n   c\n)\n: ((d > e) ? (\n   '
+                            'f\n)\n: ((g == h) ? (\n   i\n)\n: (\n   j\n))))'))
+
+
+    def test_ternary_bad(self):
+        self.assertRaises(NineMLMathParseError,
+                          Expression, 'a < b ? (c ? d : e) : f')
+
+    def test_ternary_nested(self):
+        expr = Expression('a < b ? c : d > e ? f : g == h ? i : j')
+        self.assertEqual(
+            expr.rhs, Piecewise((self.c, sympy.Lt(self.a, self.b)),
+                                (self.f, sympy.Gt(self.d, self.e)),
+                                (self.i, sympy.Eq(self.g, self.h)),
+                                (self.j, True)))
+
+
 class Rationals_test(unittest.TestCase):
 
     def test_xml(self):

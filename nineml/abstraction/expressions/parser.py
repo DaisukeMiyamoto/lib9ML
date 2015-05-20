@@ -1,5 +1,5 @@
 from __future__ import division
-from itertools import chain, izip, izip_longest
+from itertools import chain, izip
 import sympy
 from sympy.parsing.sympy_parser import (
     parse_expr as sympy_parse, standard_transformations, convert_xor)
@@ -187,7 +187,8 @@ class Parser(object):
         """Checks if the provided Sympy function is a valid 9ML function"""
         if (isinstance(expr, sympy.Function) and
                 str(type(expr)) not in chain(
-                    cls._valid_funcs, cls.inline_randoms_dict.iterkeys())):
+                    cls._valid_funcs, cls.inline_randoms_dict.iterkeys()) and
+                not isinstance(expr, sympy.Piecewise)):
             raise NineMLMathParseError(
                 "'{}' is a valid function in Sympy but not in 9ML"
                 .format(type(expr)))
