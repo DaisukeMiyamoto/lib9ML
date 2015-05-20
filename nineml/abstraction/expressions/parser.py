@@ -1,10 +1,10 @@
 from __future__ import division
-from itertools import chain, izip
+from itertools import chain, izip, izip_longest
 import sympy
 from sympy.parsing.sympy_parser import (
     parse_expr as sympy_parse, standard_transformations, convert_xor)
 from sympy.parsing.sympy_tokenize import NAME, OP
-from sympy.functions.elementary.piecewise import Piecewise, ExprCondPair
+from sympy.functions import Piecewise
 import operator
 import re
 from nineml.exceptions import NineMLMathParseError
@@ -26,7 +26,8 @@ class Parser(object):
     _func_to_op_map = {sympy.Function('pow'): operator.pow}
     _escape_random_re = re.compile(r'(?<!\w)random\.(\w+)(?!\w)')
     _unescape_random_re = re.compile(r'(?<!\w)random_(\w+)_(?!\w)')
-    _ternary_split_re = re.compile(r'[\?:]')    
+    _ternary_split_re = re.compile(r'[\?:]')
+    _logical_ops_re = re.compile(r'(&{1,2}|\|{1,2})')
     _sympy_transforms = list(standard_transformations) + [convert_xor]
     inline_randoms_dict = {
         'random_uniform_': sympy.Function('random_uniform_'),
@@ -42,28 +43,29 @@ class Parser(object):
             if isinstance(expr, sympy.Basic):
                 self._check_valid_funcs(expr)
             elif isinstance(expr, basestring):
-                try:
                     # Check to see whether expression contains a ternary op.
                     if '?' in expr:
-                        return Piecewise(self._split_into_piecies(expr))
+                        return Piecewise(*self._split_pieces(expr))
                     else:
-                        return self._parse_subexpr(expr)
-                except Exception, e:
-                    raise NineMLMathParseError(
-                        "Could not parse math-inline expression: {}\n\n{}"
-                        .format(expr, e))
+#                         try:
+                        return self._parse_expr(expr)
+#                         except Exception, e:
+#                             raise NineMLMathParseError(
+#                                 "Could not parse math-inline expression: "
+#                                 "{}\n\n{}".format(expr, e))
             else:
                 raise TypeError("Cannot convert value '{}' of type '{}' to "
                                 " SymPy expression".format(repr(expr),
                                                            type(expr)))
         return expr
 
-    def _parse_subexpr(self, expr):
+    def _parse_expr(self, expr):
         expr = self.escape_random_namespace(expr)
+        expr = self._parse_equalities(expr)
         expr = sympy_parse(
             expr, transformations=([self] + self._sympy_transforms),
-            local_dict=self.inline_randoms_dict)       
-        return self._postprocess(expr)    
+            local_dict=self.inline_randoms_dict)
+        return self._postprocess(expr)
 
     def _preprocess(self, tokens):
         """
@@ -84,6 +86,8 @@ class Parser(object):
                     tokval = 'True'
                 elif tokval == 'false':
                     tokval = 'False'
+                elif tokval == '__equals__':
+                    tokval = 'Eq'
             # Handle multiple negations
             elif toknum == OP and tokval.startswith('!'):
                 # NB: Multiple !'s are grouped into the one token
@@ -122,17 +126,14 @@ class Parser(object):
         return new_result
 
     def _postprocess(self, expr):
-        # Replace 'pow' functions with sympy '**'
-        if isinstance(expr, sympy.Basic):
-            expr = expr.replace(sympy.Function('pow'), lambda b, e: b ** e)
-            # Convert symbol names that were escaped to avoid clashes with in-
-            # built Sympy functions back to their original form
-            while self.escaped_names:
-                name = self.escaped_names.pop()
-                expr = expr.xreplace(
-                    {sympy.Symbol(self._escape(name)): sympy.Symbol(name)})
-            # Convert ANSI C functions to corresponding operator (i.e. 'pow')
-            expr = self._func_to_op(expr)
+        # Convert symbol names that were escaped to avoid clashes with in-built
+        # Sympy functions back to their original form
+        while self.escaped_names:
+            name = self.escaped_names.pop()
+            expr = expr.xreplace(
+                {sympy.Symbol(self._escape(name)): sympy.Symbol(name)})
+        # Convert ANSI C functions to corresponding operator (i.e. 'pow')
+        expr = self._func_to_op(expr)
         return expr
 
     def __call__(self, tokens, local_dict, global_dict):  # @UnusedVariable
@@ -142,12 +143,64 @@ class Parser(object):
         """
         return self._preprocess(tokens)
 
+    def _split_pieces(self, expr):
+        if '?' in expr:
+            cond, remaining = expr.split('?', 1)
+            try:
+                if remaining.index('?') < remaining.find(':'):
+                    raise NineMLMathParseError(
+                        "Nested ternary statements are only permitted in the "
+                        "second branch of the enclosing ternary statement: {}"
+                        .format(expr))
+            except ValueError:
+                pass  # If there are no more '?'s in the expression
+            try:
+                subexpr, remaining = remaining.split(':', 1)
+            except ValueError:
+                raise NineMLMathParseError(
+                    "Missing ':' in ternary statement: {}".format(expr))
+            # Concatenate sub expressions of the piecewise.
+            pieces = ([(self._parse_expr(subexpr), self._parse_expr(cond))] +
+                      self._split_pieces(remaining))
+        else:
+            pieces = [(self._parse_expr(expr), True)]
+        return pieces
+
+    @classmethod
+    def _parse_equalities(cls, expr):
+        """
+        Escapes '==' operators which aren't interpreted as equalities in Sympy
+        and temporarily replaces them with '__equals__', which is reverted to
+        SymPy's Eq after the variable name escaping is performed.
+        """
+        if '==' in expr:
+            parts = cls._logical_ops_re.split(expr)
+            expr = ''
+            for sub_expr, op in izip_longest(parts[::2], parts[1::2],
+                                             fillvalue=None):
+                if '==' in sub_expr:
+                    sub_expr = sub_expr.strip()
+                    if len(parts) > 1:
+                        if not (sub_expr.startswith('(') and
+                                sub_expr.endswith(')')):
+                            raise NineMLMathParseError(
+                                "Sub expressions need to be enclosed in "
+                                "parenthesis: {}".format(expr))
+                        sub_expr = sub_expr[1:-1]
+                    # Can't use 'Eq' here as it will be escaped, so start off
+                    # with an escaped name and change it back.
+                    expr += '__equals__({}, {})'.format(*sub_expr.split('=='))
+                    if op is not None:
+                        expr += op
+        return expr
+
     @classmethod
     def _escape(self, s):
         return s + '__escaped__'
 
     @classmethod
     def _func_to_op(self, expr):
+        """Maps functions to SymPy operators (only 'pow' at this stage)"""
         if isinstance(expr, sympy.Function):
             args = (self._func_to_op(a) for a in expr.args)
             try:
@@ -158,6 +211,7 @@ class Parser(object):
 
     @classmethod
     def _check_valid_funcs(cls, expr):
+        """Checks if the provided Sympy function is a valid 9ML function"""
         if (isinstance(expr, sympy.Function) and
                 str(type(expr)) not in chain(
                     cls._valid_funcs, cls.inline_randoms_dict.iterkeys())):
@@ -177,4 +231,4 @@ class Parser(object):
 
     @classmethod
     def inline_random_distributions(cls):
-        return cls.inline_randoms_dict.itervalues()  
+        return cls.inline_randoms_dict.itervalues()

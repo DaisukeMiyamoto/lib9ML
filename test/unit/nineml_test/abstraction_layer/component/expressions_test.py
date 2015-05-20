@@ -4,6 +4,7 @@ from nineml.abstraction import (Expression,
                                       Alias, StateAssignment, TimeDerivative)
 from nineml.abstraction.expressions import (
     ExpressionWithSimpleLHS, Constant)
+from sympy.functions import Piecewise
 from nineml.exceptions import NineMLMathParseError
 from nineml.units import coulomb, S_per_cm2, mV
 from nineml.abstraction.componentclass.visitors.xml import (
@@ -124,6 +125,14 @@ class AnsiC89ToSympy_test(unittest.TestCase):
     def setUp(self):
         self.a = sympy.Symbol('a')
         self.b = sympy.Symbol('b')
+        self.c = sympy.Symbol('c')
+        self.d = sympy.Symbol('d')
+        self.e = sympy.Symbol('e')
+        self.f = sympy.Symbol('f')
+        self.g = sympy.Symbol('g')
+        self.h = sympy.Symbol('h')
+        self.i = sympy.Symbol('i')
+        self.j = sympy.Symbol('j')
 
     def test_logical_and(self):
         expr = Expression('a && b')
@@ -132,6 +141,24 @@ class AnsiC89ToSympy_test(unittest.TestCase):
     def test_logical_or(self):
         expr = Expression('a || b')
         self.assertEqual(expr.rhs, sympy.Or(self.a, self.b))
+
+    def test_equality(self):
+        expr = Expression('a == b')
+        self.assertEqual(expr.rhs, sympy.Eq(self.a, self.b))
+
+    def test_equality_combined(self):
+        expr = Expression('(a == b) && (c == d) || (e == f)')
+        self.assertEqual(
+            expr.rhs, sympy.Or(sympy.And(sympy.Eq(self.a, self.b),
+                                         sympy.Eq(self.c, self.d)),
+                               sympy.Eq(self.e, self.f)))
+
+    def test_nested_relational(self):
+        expr = Expression('((a == b) || (c == d)) && ((e == f) || (g < f))')
+        self.assertEqual(
+            expr.rhs, sympy.Or(sympy.And(sympy.Eq(self.a, self.b),
+                                         sympy.Eq(self.c, self.d)),
+                               sympy.Eq(self.e, self.f)))
 
     def test_pow(self):
         expr = Expression('pow(a, b)')
@@ -148,6 +175,20 @@ class AnsiC89ToSympy_test(unittest.TestCase):
     def test_triple_negation(self):
         expr = Expression('!!!a')
         self.assertEqual(expr.rhs, sympy.Not(self.a))
+
+    def test_ternary_simple(self):
+        expr = Expression('a < b ? c : d')
+        self.assertEqual(
+            expr.rhs, Piecewise((self.c, sympy.Lt(self.a, self.b)),
+                                (self.d, True)))
+
+    def test_ternary_nested(self):
+        expr = Expression('a < b ? c : d > e ? f : g == h ? i : j')
+        self.assertEqual(
+            expr.rhs, Piecewise((self.c, sympy.Lt(self.a, self.b)),
+                                (self.f, sympy.Gt(self.d, self.e)),
+                                (self.i, sympy.Eq(self.g, self.h)),
+                                (self.j, True)))
 
 
 class Rationals_test(unittest.TestCase):
