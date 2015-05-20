@@ -26,6 +26,7 @@ class Parser(object):
     _func_to_op_map = {sympy.Function('pow'): operator.pow}
     _escape_random_re = re.compile(r'(?<!\w)random\.(\w+)(?!\w)')
     _unescape_random_re = re.compile(r'(?<!\w)random_(\w+)_(?!\w)')
+    _ternary_split_re = re.compile(r'[\?:]')    
     _sympy_transforms = list(standard_transformations) + [convert_xor]
     inline_randoms_dict = {
         'random_uniform_': sympy.Function('random_uniform_'),
@@ -61,10 +62,7 @@ class Parser(object):
         expr = self.escape_random_namespace(expr)
         expr = sympy_parse(
             expr, transformations=([self] + self._sympy_transforms),
-            local_dict=self.inline_randoms_dict)
-        # TODO: Could perform a second pass parse and assume all
-        #       symbols to be real (not sure it is necessary
-        #       though)          
+            local_dict=self.inline_randoms_dict)       
         return self._postprocess(expr)    
 
     def _preprocess(self, tokens):
