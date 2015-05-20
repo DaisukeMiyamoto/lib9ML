@@ -27,7 +27,8 @@ class Parser(object):
     _escape_random_re = re.compile(r'(?<!\w)random\.(\w+)(?!\w)')
     _unescape_random_re = re.compile(r'(?<!\w)random_(\w+)_(?!\w)')
     _ternary_split_re = re.compile(r'[\?:]')
-    _logical_ops_re = re.compile(r'(&{1,2}|\|{1,2})')
+    _match_first_re = re.compile(r'((?:-)?(?:\w+|[\d\.]+) *)$')
+    _match_second_re = re.compile(r' *(?:-)?[\w\d\.]+')
     _sympy_transforms = list(standard_transformations) + [convert_xor]
     inline_randoms_dict = {
         'random_uniform_': sympy.Function('random_uniform_'),
@@ -47,12 +48,7 @@ class Parser(object):
                     if '?' in expr:
                         return Piecewise(*self._split_pieces(expr))
                     else:
-                        try:
-                            return self._parse_expr(expr)
-                        except Exception, e:
-                            raise NineMLMathParseError(
-                                "Could not parse math-inline expression: "
-                                "{}\n\n{}".format(expr, e))
+                        return self._parse_expr(expr)
             else:
                 raise TypeError("Cannot convert value '{}' of type '{}' to "
                                 " SymPy expression".format(repr(expr),
@@ -62,9 +58,14 @@ class Parser(object):
     def _parse_expr(self, expr):
         expr = self.escape_random_namespace(expr)
         expr = self._escape_equalities(expr)
-        expr = sympy_parse(
-            expr, transformations=([self] + self._sympy_transforms),
-            local_dict=self.inline_randoms_dict)
+        try:
+            expr = sympy_parse(
+                expr, transformations=([self] + self._sympy_transforms),
+                local_dict=self.inline_randoms_dict)
+        except Exception, e:
+            raise NineMLMathParseError(
+                "Could not parse math-inline expression: "
+                "{}\n\n{}".format(expr, e))
         return self._postprocess(expr)
 
     def _preprocess(self, tokens):
@@ -218,15 +219,13 @@ class Parser(object):
                                                    close_bracket='(',
                                                    direction='backwards')
                     else:
-                        first = re.search(r'((?:-)?(?:\w+|[\d\.]+) *)$',
-                                          before).group(1)
+                        first = cls._match_first_re.search(before).group(1)
                     if after.lstrip().startswith('('):
                         second = cls._match_bracket(after, open_bracket='(',
                                                       close_bracket=')')
                         second = cls._escape_equalities(second)
                     else:
-                        second = re.match(r' *(?:-)?[\w\d\.]+',
-                                            after).group(0)
+                        second = cls._match_second_re.match(after).group(0)
                     insert_string = '__equals__({}, {})'.format(first, second)
                     string = (string[:i - len(first)] + insert_string +
                               string[i + len(second) + 2:])
@@ -235,8 +234,8 @@ class Parser(object):
         return string
 
     @classmethod
-    def match_bracket(cls, string, open_bracket, close_bracket,
-                      direction='forwards'):
+    def _match_bracket(cls, string, open_bracket, close_bracket,
+                       direction='forwards'):
         depth = 0
         if direction == 'backwards':
             string = string[::-1]
