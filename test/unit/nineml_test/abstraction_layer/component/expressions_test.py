@@ -156,9 +156,10 @@ class AnsiC89ToSympy_test(unittest.TestCase):
     def test_nested_relational(self):
         expr = Expression('((a == b) || (c == d)) && ((e == f) || (g < f))')
         self.assertEqual(
-            expr.rhs, sympy.Or(sympy.And(sympy.Eq(self.a, self.b),
+            expr.rhs, sympy.And(sympy.Or(sympy.Eq(self.a, self.b),
                                          sympy.Eq(self.c, self.d)),
-                               sympy.Eq(self.e, self.f)))
+                                sympy.Or(sympy.Eq(self.e, self.f),
+                                         sympy.Lt(self.g, self.f))))
 
     def test_pow(self):
         expr = Expression('pow(a, b)')

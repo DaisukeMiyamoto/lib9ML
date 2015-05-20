@@ -61,7 +61,7 @@ class Parser(object):
 
     def _parse_expr(self, expr):
         expr = self.escape_random_namespace(expr)
-        expr = self._parse_equalities(expr)
+        expr = self._escape_equalities(expr)
         expr = sympy_parse(
             expr, transformations=([self] + self._sympy_transforms),
             local_dict=self.inline_randoms_dict)
@@ -165,34 +165,34 @@ class Parser(object):
         else:
             pieces = [(self._parse_expr(expr), True)]
         return pieces
-
-    @classmethod
-    def _parse_equalities(cls, expr):
-        """
-        Escapes '==' operators which aren't interpreted as equalities in Sympy
-        and temporarily replaces them with '__equals__', which is reverted to
-        SymPy's Eq after the variable name escaping is performed.
-        """
-        if '==' in expr:
-            parts = cls._logical_ops_re.split(expr)
-            expr = ''
-            for sub_expr, op in izip_longest(parts[::2], parts[1::2],
-                                             fillvalue=None):
-                if '==' in sub_expr:
-                    sub_expr = sub_expr.strip()
-                    if len(parts) > 1:
-                        if not (sub_expr.startswith('(') and
-                                sub_expr.endswith(')')):
-                            raise NineMLMathParseError(
-                                "Sub expressions need to be enclosed in "
-                                "parenthesis: {}".format(expr))
-                        sub_expr = sub_expr[1:-1]
-                    # Can't use 'Eq' here as it will be escaped, so start off
-                    # with an escaped name and change it back.
-                    expr += '__equals__({}, {})'.format(*sub_expr.split('=='))
-                    if op is not None:
-                        expr += op
-        return expr
+# 
+#     @classmethod
+#     def _parse_equalities(cls, expr):
+#         """
+#         Escapes '==' operators which aren't interpreted as equalities in Sympy
+#         and temporarily replaces them with '__equals__', which is reverted to
+#         SymPy's Eq after the variable name escaping is performed.
+#         """
+#         if '==' in expr:
+#             parts = cls._logical_ops_re.split(expr)
+#             expr = ''
+#             for sub_expr, op in izip_longest(parts[::2], parts[1::2],
+#                                              fillvalue=None):
+#                 if '==' in sub_expr:
+#                     sub_expr = sub_expr.strip()
+#                     if len(parts) > 1:
+#                         if not (sub_expr.startswith('(') and
+#                                 sub_expr.endswith(')')):
+#                             raise NineMLMathParseError(
+#                                 "Sub expressions need to be enclosed in "
+#                                 "parenthesis: {}".format(expr))
+#                         sub_expr = sub_expr[1:-1]
+#                     # Can't use 'Eq' here as it will be escaped, so start off
+#                     # with an escaped name and change it back.
+#                     expr += '__equals__({}, {})'.format(*sub_expr.split('=='))
+#                     if op is not None:
+#                         expr += op
+#         return expr
 
     @classmethod
     def _escape(self, s):
@@ -232,3 +232,52 @@ class Parser(object):
     @classmethod
     def inline_random_distributions(cls):
         return cls.inline_randoms_dict.itervalues()
+
+    @classmethod
+    def _escape_equalities(cls, string):
+        if '==' in string:
+            i = 0
+            while i < (len(string) - 1):
+                if string[i:i + 2] == '==':
+                    before = string[:i]
+                    after = string[i + 2:]
+                    if before.rstrip().endswith(')'):
+                        first = cls._match_bracket(before, open_bracket=')',
+                                                   close_bracket='(',
+                                                   direction='backwards')
+                    else:
+                        first = re.search(r'((?:-)?(?:\w+|[\d\.]+) *)$',
+                                          before).group(1)
+                    if after.lstrip().startswith('('):
+                        second = cls._match_bracket(after, open_bracket='(',
+                                                      close_bracket=')')
+                        second = cls._escape_equalities(second)
+                    else:
+                        second = re.match(r' *(?:-)?[\w\d\.]+',
+                                            after).group(0)
+                    insert_string = '__equals__({}, {})'.format(first, second)
+                    string = (string[:i - len(first)] + insert_string +
+                              string[i + len(second) + 2:])
+                    i += len(insert_string) - len(first)
+                i += 1
+        return string
+
+    @classmethod
+    def match_bracket(cls, string, open_bracket, close_bracket,
+                      direction='forwards'):
+        depth = 0
+        if direction == 'backwards':
+            string = string[::-1]
+        for i, c in enumerate(string):
+            if c == open_bracket:
+                depth += 1
+            elif c == close_bracket:
+                depth -= 1
+                if depth == 0:
+                    output = string[:i + 1]
+                    if direction == 'backwards':
+                        output = output[::-1]
+                    return output
+        raise NineMLMathParseError(
+            "No matching '{}' found for opening '{}' in string '{}'"
+            .format(close_bracket, open_bracket, string))
