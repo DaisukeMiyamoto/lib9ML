@@ -47,12 +47,12 @@ class Parser(object):
                     if '?' in expr:
                         return Piecewise(*self._split_pieces(expr))
                     else:
-#                         try:
-                        return self._parse_expr(expr)
-#                         except Exception, e:
-#                             raise NineMLMathParseError(
-#                                 "Could not parse math-inline expression: "
-#                                 "{}\n\n{}".format(expr, e))
+                        try:
+                            return self._parse_expr(expr)
+                        except Exception, e:
+                            raise NineMLMathParseError(
+                                "Could not parse math-inline expression: "
+                                "{}\n\n{}".format(expr, e))
             else:
                 raise TypeError("Cannot convert value '{}' of type '{}' to "
                                 " SymPy expression".format(repr(expr),
@@ -165,34 +165,6 @@ class Parser(object):
         else:
             pieces = [(self._parse_expr(expr), True)]
         return pieces
-# 
-#     @classmethod
-#     def _parse_equalities(cls, expr):
-#         """
-#         Escapes '==' operators which aren't interpreted as equalities in Sympy
-#         and temporarily replaces them with '__equals__', which is reverted to
-#         SymPy's Eq after the variable name escaping is performed.
-#         """
-#         if '==' in expr:
-#             parts = cls._logical_ops_re.split(expr)
-#             expr = ''
-#             for sub_expr, op in izip_longest(parts[::2], parts[1::2],
-#                                              fillvalue=None):
-#                 if '==' in sub_expr:
-#                     sub_expr = sub_expr.strip()
-#                     if len(parts) > 1:
-#                         if not (sub_expr.startswith('(') and
-#                                 sub_expr.endswith(')')):
-#                             raise NineMLMathParseError(
-#                                 "Sub expressions need to be enclosed in "
-#                                 "parenthesis: {}".format(expr))
-#                         sub_expr = sub_expr[1:-1]
-#                     # Can't use 'Eq' here as it will be escaped, so start off
-#                     # with an escaped name and change it back.
-#                     expr += '__equals__({}, {})'.format(*sub_expr.split('=='))
-#                     if op is not None:
-#                         expr += op
-#         return expr
 
     @classmethod
     def _escape(self, s):
