@@ -26,17 +26,18 @@ class Parser(object):
     _func_to_op_map = {sympy.Function('pow'): operator.pow}
     _escape_random_re = re.compile(r'(?<!\w)random\.(\w+)(?!\w)')
     _unescape_random_re = re.compile(r'(?<!\w)random_(\w+)_(?!\w)')
-    _ternary_split_re = re.compile(r'[\?:]')
+    _ternary_split_re = re.compile(r'(\?|\:|\(|\))')
     _match_first_re = re.compile(r'((?:-)?(?:\w+|[\d\.]+) *)$')
     _match_second_re = re.compile(r' *(?:-)?[\w\d\.]+')
-    _sympy_transforms = list(standard_transformations) + [convert_xor]
-    _precedence = {'&&': 2, '&': 2, '|': 3, '||': 3, '>=': 1, '>': 1,
-                   '<': 1, '<=': 1, '==': 1, '=': 1}
+    _logic_relation_re = re.compile(r'(?:&|\||<|>|=)')
     # Matches logic and relational expressions, as well as parens and funcname(
     _tokenize_logic_re = re.compile(r'\s*(&{1,2}|\|{1,2}|<=?|>=?|==?|'
                                     r'(?:\w+|!|~)?\s*\(|\))\s*')
     # Matches function names+plus opening paren and just opening paren
-    _open_paren_or_func_re = re.compile(r'(?:\w+|!|~)?\s*\(')
+    _left_paren_func_re = re.compile(r'(?:\w+|!|~)?\s*\(')
+    _sympy_transforms = list(standard_transformations) + [convert_xor]
+    _precedence = {'&&': 2, '&': 2, '|': 3, '||': 3, '>=': 1, '>': 1,
+                   '<': 1, '<=': 1, '==': 1, '=': 1}
     inline_randoms_dict = {
         'random_uniform_': sympy.Function('random_uniform_'),
         'random_binomial_': sympy.Function('random_binomial_'),
@@ -44,7 +45,7 @@ class Parser(object):
         'random_exponential_': sympy.Function('random_exponential_')}
 
     def __init__(self):
-        self.escaped_names = set()
+        self.escaped_names = None
 
     def parse(self, expr):
         if not isinstance(expr, (int, float)):
@@ -53,7 +54,7 @@ class Parser(object):
             elif isinstance(expr, basestring):
                     # Check to see whether expression contains a ternary op.
                     if '?' in expr:
-                        return Piecewise(*self._split_pieces(expr))
+                        return self._parse_piecewise(expr)
                     else:
                         return self._parse_expr(expr)
             else:
@@ -64,7 +65,9 @@ class Parser(object):
 
     def _parse_expr(self, expr):
         expr = self.escape_random_namespace(expr)
-        expr = self._escape_relationals(expr)
+        if self._logic_relation_re.search(expr):
+            expr = self._parse_relationals(expr)
+        self.escaped_names = set()
         try:
             expr = sympy_parse(
                 expr, transformations=([self] + self._sympy_transforms),
@@ -74,6 +77,44 @@ class Parser(object):
                 "Could not parse math-inline expression: "
                 "{}\n\n{}".format(expr, e))
         return self._postprocess(expr)
+
+    def _parse_piecewise(self, expr):
+        tokens = (['('] +
+                  [t for t in self._ternary_split_re.split(expr)
+                   if t.strip()] + [')'])
+        within_parens = ['']
+        first_branch = False
+        conds = []
+        sub_exprs = []
+        for tok in tokens:
+            if tok == '(':
+                within_parens.append('')
+            elif tok == ')':
+                # concat the current level
+                stack_top = '(' + within_parens.pop() + ')'
+                within_parens[-1] += stack_top
+            elif tok == '?':
+                if first_branch:
+                    raise NineMLMathParseError(
+                        "Nested ternary statements are only permitted in "
+                        "the second branch of the enclosing ternary "
+                        "statement: {}".format(expr))
+                conds.append(within_parens[-1])
+                within_parens[-1] = ''  # Reset the parentheses
+                first_branch = True
+            elif tok == ':':
+                sub_exprs.append(within_parens[-1])
+                within_parens[-1] = ''
+                first_branch = False
+            else:
+                within_parens[-1] += tok
+        # Add final expression ('otherwise') to end of list
+        sub_exprs.append(within_parens[-1])
+        conds.append(True)
+        assert len(sub_exprs) == len(conds)
+        return Piecewise(*zip(sub_exprs,
+                              (self._parse_relationals(c, escape='')
+                               for c in conds)))
 
     def _preprocess(self, tokens):
         """
@@ -151,29 +192,6 @@ class Parser(object):
         """
         return self._preprocess(tokens)
 
-    def _split_pieces(self, expr):
-        if '?' in expr:
-            cond, remaining = expr.split('?', 1)
-            try:
-                if remaining.index('?') < remaining.find(':'):
-                    raise NineMLMathParseError(
-                        "Nested ternary statements are only permitted in the "
-                        "second branch of the enclosing ternary statement: {}"
-                        .format(expr))
-            except ValueError:
-                pass  # If there are no more '?'s in the expression
-            try:
-                subexpr, remaining = remaining.split(':', 1)
-            except ValueError:
-                raise NineMLMathParseError(
-                    "Missing ':' in ternary statement: {}".format(expr))
-            # Concatenate sub expressions of the piecewise.
-            pieces = ([(self._parse_expr(subexpr), self._parse_expr(cond))] +
-                      self._split_pieces(remaining))
-        else:
-            pieces = [(self._parse_expr(expr), True)]
-        return pieces
-
     @classmethod
     def _escape(self, s):
         return s + '__escaped__'
@@ -216,19 +234,15 @@ class Parser(object):
         return cls.inline_randoms_dict.itervalues()
 
     @classmethod
-    def _escape_relationals(cls, expr_string):
+    def _parse_relationals(cls, expr_string, escape='__'):
         """
         Based on shunting-yard algorithm
         (see http://en.wikipedia.org/wiki/Shunting-yard_algorithm)
         with modifications for skipping over non logical/relational operators
         and associated parentheses.
         """
-        # Matches relationals, booleans, function names+plus opening paren
-        # and open and closing parens.
-        tokenize_re = re.compile(r'\s*(&{1,2}|\|{1,2}|<=?|>=?|==?|'
-                                 r'(?:\w+|!|~)?\s*\(|\))\s*')
-        # Matches function names+plus opening paren and just opening paren
-        open_paren_re = re.compile(r'(?:\w+|!|~)?\s*\(')
+        if isinstance(expr_string, bool):
+            return expr_string
         # Splits and throws away empty tokens (between parens and operators)
         # and encloses the whole expression in parens
         tokens = (['('] +
@@ -249,7 +263,7 @@ class Parser(object):
         num_args = [0]  # top-level should always be set to 1
         for tok in tokens:
             # If opening paren or function name + paren
-            if open_paren_re.match(tok):
+            if cls._left_paren_func_re.match(tok):
                 operators.append(tok)
                 is_relational.append(False)
                 num_args.append(0)
@@ -267,7 +281,7 @@ class Parser(object):
                     try:
                         # Get index of last open paren
                         i = -1
-                        while not open_paren_re.match(operators[i]):
+                        while not cls._left_paren_func_re.match(operators[i]):
                             i -= 1
                     except IndexError:
                         raise NineMLMathParseError(
@@ -291,19 +305,19 @@ class Parser(object):
                         arg1, arg2 = (level_operands.pop(i),
                                       level_operands.pop(i))
                         if operator.startswith('&'):
-                            func = "And__({}, {})".format(arg1, arg2)
+                            func = "And{}({}, {})".format(escape, arg1, arg2)
                         elif operator.startswith('|'):
-                            func = "Or__({}, {})".format(arg1, arg2)
+                            func = "Or{}({}, {})".format(escape, arg1, arg2)
                         elif operator.startswith('='):
-                            func = "Eq__({}, {})".format(arg1, arg2)
+                            func = "Eq{}({}, {})".format(escape, arg1, arg2)
                         elif operator == '<':
-                            func = "Lt__({}, {})".format(arg1, arg2)
+                            func = "Lt{}({}, {})".format(escape, arg1, arg2)
                         elif operator == '>':
-                            func = "Gt__({}, {})".format(arg1, arg2)
+                            func = "Gt{}({}, {})".format(escape, arg1, arg2)
                         elif operator == '<=':
-                            func = "Le__({}, {})".format(arg1, arg2)
+                            func = "Le{}({}, {})".format(escape, arg1, arg2)
                         elif operator == '>=':
-                            func = "Ge__({}, {})".format(arg1, arg2)
+                            func = "Ge{}({}, {})".format(escape, arg1, arg2)
                         else:
                             assert False
                         level_operands.insert(i, func)
@@ -322,7 +336,7 @@ class Parser(object):
                             .format(expr_string))
                 num_args[-1] += 1
             # If the token is one of ('&', '|', '<', '>', '<=', '>=' or '==')
-            elif tokenize_re.match(tok):
+            elif cls._tokenize_logic_re.match(tok):
                 operators.append(tok)
                 is_relational[-1] = True  # parse the last set of parenthesis
                 # Check if there are more than one LHS sub-expr. to concatenate

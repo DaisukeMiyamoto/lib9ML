@@ -126,4 +126,11 @@ class ComponentClassXMLWriter(ComponentVisitor):
                  value=str(constant.value),
                  units=constant.units.name)
 
+    def _sort(self, elements):
+        """Sorts the element into a consistent, logical order before write"""
+        return sorted(
+            elements,
+            key=lambda e: self.write_order.index(e.tag[len(NINEML):]))
+
+
 from nineml.document import Document

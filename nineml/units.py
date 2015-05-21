@@ -124,7 +124,7 @@ class Dimension(BaseNineMLObject, DocumentLevelObject):
         return self.i
 
     @annotate_xml
-    def to_xml(self):
+    def to_xml(self, **kwargs):  # @UnusedVariable
         kwargs = {'name': self.name}
         kwargs.update(dict(
             (n, str(p))
@@ -299,7 +299,7 @@ class Unit(BaseNineMLObject, DocumentLevelObject):
         return self.name
 
     @annotate_xml
-    def to_xml(self):
+    def to_xml(self, **kwargs):  # @UnusedVariable
         kwargs = {'symbol': self.name, 'dimension': self.dimension.name,
                   'power': str(self.power)}
         if self.offset:
@@ -397,6 +397,7 @@ dimensionless = Dimension(name="dimensionless")
 energy_per_temperature = Dimension(name="energy_per_temperature", m=1, l=2,
                                    t=-2, k=-1)
 luminous_intensity = Dimension(name="luminous_intensity", j=1)
+voltage_per_time = voltage / time
 
 # ------------ #
 # Common units #
@@ -421,6 +422,7 @@ V = Unit(name="V", dimension=voltage, power=0)
 mV = Unit(name="mV", dimension=voltage, power=-3)
 per_V = Unit(name="per_V", dimension=per_voltage, power=0)
 per_mV = Unit(name="per_mV", dimension=per_voltage, power=3)
+mV_per_ms = Unit(name="mV_per_ms", dimension=voltage_per_time, power=0)
 ohm = Unit(name="ohm", dimension=resistance, power=0)
 kohm = Unit(name="kohm", dimension=resistance, power=3)
 Mohm = Unit(name="Mohm", dimension=resistance, power=6)

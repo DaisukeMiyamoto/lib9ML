@@ -17,7 +17,11 @@ class ComponentActionVisitor(ComponentVisitor):
 
     def __init__(self, require_explicit_overrides=True):
         self.require_explicit_overrides = require_explicit_overrides
+<<<<<<< refactor_v2
         self._scopes = []        
+=======
+        self._scopes = []
+>>>>>>> HEAD~1
 
     def visit_componentclass(self, component_class, **kwargs):
         self.action_componentclass(component_class, **kwargs)
@@ -55,3 +59,4 @@ class ComponentActionVisitor(ComponentVisitor):
 
     def action_constant(self, constant, **kwargs):  # @UnusedVariable
         self.check_pass()
+

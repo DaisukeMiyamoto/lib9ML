@@ -10,9 +10,11 @@ from copy import deepcopy
 import sympy
 from sympy.printing import ccode
 from sympy.logic.boolalg import BooleanTrue, BooleanFalse
+from sympy.functions.elementary.piecewise import ExprCondPair
 import re
 # import math_namespace
 from nineml.exceptions import NineMLRuntimeError
+
 
 builtin_constants = set(['true', 'false', 'True', 'False'])
 builtin_functions = set([
@@ -43,6 +45,7 @@ class Expression(object):
                        for k, v in Parser.inline_randoms_dict.iteritems()] +
                       [('abs', 'fabs')])
     _rationals_re = re.compile(r'(\d+)\.0L/(\d+).0L')
+    _multiple_whitespace_re = re.compile(r'\s+')
     _ccode_print_warn_re = re.compile(r'// (?:Not supported in C:|abs)\n')
 
     def __init__(self, rhs):
@@ -111,6 +114,7 @@ class Expression(object):
         s = ccode(rhs, user_functions=self._random_map)
         s = self._rationals_re.sub(r'\1/\2', s)
         s = self._ccode_print_warn_re.sub('', s)
+        s = self._multiple_whitespace_re.sub(' ', s)
         return s
 
     @property
@@ -227,7 +231,8 @@ class Expression(object):
     def rhs_substituted(self, name_map):
         """Replace atoms on the RHS with values in the name_map"""
         return self.rhs.xreplace(dict(
-            (sympy.sympify(old), sympy.sympify(new))
+            (sympy.Symbol(old), (sympy.Symbol(new)
+                                 if isinstance(new, basestring) else new))
             for old, new in name_map.iteritems()))
 
     def subs(self, old, new):
@@ -325,7 +330,12 @@ class Expression(object):
                 args.append(new_a)
             args = tuple(args)
             if altered:
-                return expr.func(*args, evaluate=False)
+                if isinstance(expr, ExprCondPair):
+                    return ExprCondPair(
+                        cls._non_eval_xreplace(expr.args[0], rule),
+                        cls._non_eval_xreplace(expr.args[1], rule))
+                else:
+                    return expr.func(*args, evaluate=False)
         return expr
 
     @classmethod

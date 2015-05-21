@@ -21,6 +21,10 @@ class Document(dict, BaseNineMLObject):
 
     defining_attributes = ('elements',)
     element_name = 'NineML'
+    write_order = ['Population', 'Projection', 'Selection',
+                   'Dynamics', 'ConnectionRule', 'RandomDistribution',
+                   'DynamicsProperties', 'ConnectionRuleProperties',
+                   'RandomDistributionProperties', 'Dimension', 'Unit']
 
     # A tuple to hold the unresolved elements
     _Unloaded = collections.namedtuple('_Unloaded', 'name xml cls')
@@ -232,9 +236,8 @@ class Document(dict, BaseNineMLObject):
         self.standardize_units()
         return E(
             self.element_name,
-            *[c.to_xml(as_reference=False)
-              if isinstance(c, nineml.user.BaseULObject) else c.to_xml()
-              for c in self.itervalues()])
+            *self._sort(c.to_xml(as_reference=False)
+                        for c in self.itervalues()))
 
     def write(self, filename):
         doc = self.to_xml()
@@ -303,6 +306,12 @@ class Document(dict, BaseNineMLObject):
             if s != other[k]:
                 result += s.find_mismatch(other[k])
         return result
+
+    def _sort(self, elements):
+        """Sorts the element into a consistent, logical order before write"""
+        return sorted(
+            elements,
+            key=lambda e: self.write_order.index(e.tag[len(NINEML):]))
 
 
 def load(root_element, read_from=None):

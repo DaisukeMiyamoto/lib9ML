@@ -54,7 +54,7 @@ class ConnectionRule(ComponentClass):
         return extractor.expressions
 
     @annotate_xml
-    def to_xml(self):
+    def to_xml(self, **kwargs):  # @UnusedVariable
         self.standardize_unit_dimensions()
         self.validate()
         return ConnectionRuleXMLWriter().visit(self)

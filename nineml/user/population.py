@@ -1,11 +1,12 @@
 from itertools import chain
 from . import BaseULObject
 from .component import (resolve_reference, write_reference, DynamicsProperties,
-                        RandomDistributionProperties, Component)
+                        RandomDistributionProperties)
 from nineml import DocumentLevelObject
 from nineml.xmlns import NINEML, E
 from nineml.utils import expect_single
 from nineml.annotations import annotate_xml, read_annotations
+from nineml.exceptions import NineMLRuntimeError
 
 
 class Population(BaseULObject, DocumentLevelObject):
@@ -91,6 +92,9 @@ class Population(BaseULObject, DocumentLevelObject):
         cell_component = cell.find(NINEML + 'DynamicsProperties')
         if cell_component is None:
             cell_component = cell.find(NINEML + 'Reference')
+            if cell_component is None:
+                raise NineMLRuntimeError(
+                    "No Component or Reference elements found in Population")
         return cls(name=element.attrib['name'],
                    size=int(element.find(NINEML + 'Size').text),
                    cell=DynamicsProperties.from_xml(cell_component, document),
@@ -212,7 +216,7 @@ def qstr(obj):
         return obj.__str__()
 
 
-class Structure(Component):
+class Structure(RandomDistributionProperties):
 
     """
     Component representing the structure of a network, e.g. 2D grid, random

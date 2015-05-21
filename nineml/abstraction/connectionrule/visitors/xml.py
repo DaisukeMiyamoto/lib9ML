@@ -26,7 +26,7 @@ class ConnectionRuleXMLLoader(ComponentClassXMLLoader):
         block_names = ('Parameter',)
         blocks = self._load_blocks(element, block_names=block_names)
         return ConnectionRule(
-            name=element.attrib['name']
+            name=element.get('name'),
             parameters=blocks["Parameter"])
 
     tag_to_loader = dict(
@@ -36,10 +36,15 @@ class ConnectionRuleXMLLoader(ComponentClassXMLLoader):
 
 class ConnectionRuleXMLWriter(ComponentClassXMLWriter):
 
+    # Maintains order of elements between writes
+    write_order = ['Number', 'Mask', 'Preference', 'RepeatUntil', 'Selected',
+                   'NumberSelected', 'Parameters', 'PropertyReceivePort',
+                   'Select', 'Alias', 'Constant', 'Annotations']
+
     @annotate_xml
     def visit_componentclass(self, component_class):
         return E('ConnectionRule',
-                 *[e.accept_visitor(self) for e in component_class],
+                 *self._sort(e.accept_visitor(self) for e in component_class),
                  name=component_class.name)
 
 from ..base import ConnectionRule

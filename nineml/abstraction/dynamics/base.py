@@ -678,7 +678,7 @@ class Dynamics(ComponentClass, _NamespaceMixin):
                     trans.set_target_regime(target)
 
     @annotate_xml
-    def to_xml(self):
+    def to_xml(self, **kwargs):  # @UnusedVariable
         self.standardize_unit_dimensions()
         self.validate()
         return DynamicsXMLWriter().visit(self)
