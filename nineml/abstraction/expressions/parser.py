@@ -209,28 +209,46 @@ class Parser(object):
 
     @classmethod
     def _escape_relationals(cls, expr_string):
-        tokenize_re = re.compile(r'\s*(&{1,2}|\|{1,2}|<=?|>=?|==?|\(|\))\s*')
+        tokenize_re = re.compile(r'\s*(&{1,2}|\|{1,2}|<=?|>=?|==?|'
+                                 r'(?:\w+|!|~)?\s*\(|\))\s*')
+        open_paren_re = re.compile(r'(?:\w+|!|~)?\s*\(')
         tokens = [t for t in tokenize_re.split(expr_string.strip()) if t]
-        operands = []
-        operators = []
+        # Based on shunting-yard algorithm
+        # (see http://en.wikipedia.org/wiki/Shunting-yard_algorithm)
+        # with modifications for skipping over non logical/relational operators
+        # and associated parentheses.
+        operators = []  # stack (in SY algorithm terminology)
+        operands = []  # output stream
+        to_parse = [False]  # whether the current parenthesis should be parsed
+        num_to_concat = [0]  # num. of operands concat when not parsing
         for tok in tokens:
-            if tok == '(':
+            if open_paren_re.match(tok):
                 operators.append(tok)
+                to_parse.append(False)
+                num_to_concat.append(0)
             elif tok == ')':
                 operator = operators.pop()
-                while operator != '(':
+                k = num_to_concat.pop()
+                if to_parse.pop():
                     arg2, arg1 = operands.pop(), operands.pop()
                     operands.append(cls._op2func(operator, arg1, arg2))
                     try:
-                        operator = operators.pop()
-                    except IndexError:
+                        assert operators.pop() == '('
+                    except (IndexError, AssertionError):
                         raise NineMLMathParseError(
                             "Unbalanced parentheses in expression: {}"
                             .format(expr_string))
+                else:
+                    operand = ''.join(operands[-k:])
+                    operands = operands[:-k]
+                    operands.append(operator + operand + tok)
+                    num_to_concat[-1] += 1
             elif tokenize_re.match(tok):
                 operators.append(tok)
+                to_parse[-1] = True  # parse the last set of parenthesis
             else:
-                operands.append(tok.strip())
+                operands.append(tok)
+                num_to_concat[-1] += 1
         for operator in reversed(operators):
             if operator == '(':
                 raise NineMLMathParseError(
@@ -238,8 +256,7 @@ class Parser(object):
                     .format(expr_string))
             arg2, arg1 = operands.pop(), operands.pop()
             operands.append(cls._op2func(operator, arg1, arg2))
-        assert len(operands) == 1
-        return operands[0]
+        return ''.join(operands)
 
     @classmethod
     def _op2func(cls, operator, arg1, arg2):
@@ -257,6 +274,8 @@ class Parser(object):
             func = "Le__({}, {})".format(arg1, arg2)
         elif operator == '>=':
             func = "Ge__({}, {})".format(arg1, arg2)
+        else:
+            assert False
         return func
 
     @classmethod

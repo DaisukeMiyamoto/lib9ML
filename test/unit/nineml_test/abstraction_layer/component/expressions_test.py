@@ -161,6 +161,13 @@ class AnsiC89ToSympy_test(unittest.TestCase):
                                 sympy.Or(sympy.Eq(self.e, self.f),
                                          sympy.Lt(self.g, self.f))))
 
+    def test_equality_nested_func(self):
+        expr = Expression('((a == b) || (c == pow(d, 2))) && (e == f)')
+        self.assertEqual(
+            expr.rhs, sympy.And(sympy.Or(sympy.Eq(self.a, self.b),
+                                         sympy.Eq(self.c, self.d ** 2)),
+                                sympy.Eq(self.e, self.f)))
+
     def test_pow(self):
         expr = Expression('pow(a, b)')
         self.assertEqual(expr.rhs, self.a ** self.b)
