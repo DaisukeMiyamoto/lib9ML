@@ -210,118 +210,103 @@ class Parser(object):
 
     @classmethod
     def _escape_relationals(cls, expr_string):
+        """
+        Based on shunting-yard algorithm
+        (see http://en.wikipedia.org/wiki/Shunting-yard_algorithm)
+        with modifications for skipping over non logical/relational operators
+        and associated parentheses.
+        """
+        # Matches relationals, booleans, function names+plus opening paren
+        # and open and closing parens.
         tokenize_re = re.compile(r'\s*(&{1,2}|\|{1,2}|<=?|>=?|==?|'
                                  r'(?:\w+|!|~)?\s*\(|\))\s*')
+        # Matches function names+plus opening paren and just opening paren
         open_paren_re = re.compile(r'(?:\w+|!|~)?\s*\(')
-        tokens = [t for t in tokenize_re.split(expr_string.strip()) if t]
-        # Based on shunting-yard algorithm
-        # (see http://en.wikipedia.org/wiki/Shunting-yard_algorithm)
-        # with modifications for skipping over non logical/relational operators
-        # and associated parentheses.
+        # Splits and throws away empty tokens (between parens and operators)
+        # and encloses the whole expression in parens
+        tokens = (['('] +
+                  [t for t in tokenize_re.split(expr_string.strip()) if t] +
+                  [')'])
+        tokens = tokens
         operators = []  # stack (in SY algorithm terminology)
         operands = []  # output stream
-        to_parse = [False]  # whether the current parenthesis should be parsed
-        num_args = [0]  # num. of operands concat when not parsing
+        is_relational = []  # whether the current parens should be parsed
+        # Num operands to concat when not parsing relation/bool. Because we are
+        # also splitting on parenthesis, non-logic/relational expressions will
+        # still be split on parenthesis and we need to keep track of how many
+        # pieces they are in.
+        num_args = [0]  # top-level should always be set to 1
         for tok in tokens:
+            # If opening paren or function name + paren
             if open_paren_re.match(tok):
                 operators.append(tok)
-                to_parse.append(False)
+                is_relational.append(False)
                 num_args.append(0)
+            # Closing paren.
             elif tok == ')':
-                operator = operators.pop()
-                nargs = num_args.pop()
-                if to_parse.pop():
-                    arg2, arg1 = operands.pop(), operands.pop()
-                    operands.append(cls._op2func(operator, arg1, arg2))
+                # Join together sub-expressions that have been split by parens
+                # not used for relational/boolean expressions (e.g. functions)
+                n = num_args.pop()
+                if n > 1:
+                    operands = operands[:-n] + [''.join(operands[-n:])]
+                # If parens enclosed relat/logic (i.e. '&', '|', '<', '>', etc)
+                if is_relational.pop():
                     try:
-                        assert operators.pop() == '('
-                    except (IndexError, AssertionError):
+                        # Get all the operators within the enclosing parens.
+                        # Need to sort by order of precedence
+                        i = -(operators[::-1].index('(') + 1)
+                        # Get lists of operators and operands at this level
+                        # (i.e. after the last left paren)
+                        level_operators = operators[(i + 1):]
+                        level_operands = operands[i:]
+                        # Pop these operators and operands off the list
+                        # (along with the paren)
+                        operators = operators[:i]
+                        operands = operands[:i]
+                    except IndexError:
                         raise NineMLMathParseError(
                             "Unbalanced parentheses in expression: {}"
                             .format(expr_string))
+                    while level_operators:
+                        operator = level_operators.pop()
+                        arg2, arg1 = level_operands.pop(), level_operands.pop()
+                        if operator.startswith('&'):
+                            func = "And__({}, {})".format(arg1, arg2)
+                        elif operator.startswith('|'):
+                            func = "Or__({}, {})".format(arg1, arg2)
+                        elif operator.startswith('='):
+                            func = "Eq__({}, {})".format(arg1, arg2)
+                        elif operator == '<':
+                            func = "Lt__({}, {})".format(arg1, arg2)
+                        elif operator == '>':
+                            func = "Gt__({}, {})".format(arg1, arg2)
+                        elif operator == '<=':
+                            func = "Le__({}, {})".format(arg1, arg2)
+                        elif operator == '>=':
+                            func = "Ge__({}, {})".format(arg1, arg2)
+                        else:
+                            assert False
+                        level_operands.append(func)
+                    operands.append(level_operands[0])
+                # If parens enclosed something else
                 else:
-                    operand = ''.join(operands[-nargs:])
-                    operands = operands[:-nargs]
-                    operands.append(operator + operand + tok)
+                    # Apply the function/parens to the last operand
+                    operands[-1] = operators.pop() + operands[-1] + ')'
                     num_args[-1] += 1
+            # If the token is one of ('&', '|', '<', '>', '<=', '>=' or '==')
             elif tokenize_re.match(tok):
                 operators.append(tok)
-                to_parse[-1] = True  # parse the last set of parenthesis
+                is_relational[-1] = True  # parse the last set of parenthesis
+                # Check if there are more than one LHS sub-expr. to concatenate
+                n = num_args[-1]
+                if n > 1:
+                    operands = operands[:-n] + [''.join(operands[-n:])]
+                num_args[-1] = 0
+            # If the token is an atom or a subexpr not containing any
+            # logic/relational operators or parens.
             else:
                 operands.append(tok)
                 num_args[-1] += 1
-        for operator in reversed(operators):
-            if operator == '(':
-                raise NineMLMathParseError(
-                    "Unbalanced parentheses in expression: {}"
-                    .format(expr_string))
-            arg2, arg1 = operands.pop(), operands.pop()
-            operands.append(cls._op2func(operator, arg1, arg2))
-        return ''.join(operands)
-
-    @classmethod
-    def _op2func(cls, operator, arg1, arg2):
-        if operator.startswith('&'):
-            func = "And__({}, {})".format(arg1, arg2)
-        elif operator.startswith('|'):
-            func = "Or__({}, {})".format(arg1, arg2)
-        elif operator.startswith('='):
-            func = "Eq__({}, {})".format(arg1, arg2)
-        elif operator == '<':
-            func = "Lt__({}, {})".format(arg1, arg2)
-        elif operator == '>':
-            func = "Gt__({}, {})".format(arg1, arg2)
-        elif operator == '<=':
-            func = "Le__({}, {})".format(arg1, arg2)
-        elif operator == '>=':
-            func = "Ge__({}, {})".format(arg1, arg2)
-        else:
-            assert False
-        return func
-
-    @classmethod
-    def _escape_equalities(cls, string):
-        if '==' in string:
-            i = 0
-            while i < (len(string) - 1):
-                if string[i:i + 2] == '==':
-                    before = string[:i]
-                    after = string[i + 2:]
-                    if before.rstrip().endswith(')'):
-                        first = cls._match_bracket(before, open_bracket=')',
-                                                   close_bracket='(',
-                                                   direction='backwards')
-                    else:
-                        first = cls._match_first_re.search(before).group(1)
-                    if after.lstrip().startswith('('):
-                        second = cls._match_bracket(after, open_bracket='(',
-                                                      close_bracket=')')
-                        second = cls._escape_equalities(second)
-                    else:
-                        second = cls._match_second_re.match(after).group(0)
-                    insert_string = '__equals__({}, {})'.format(first, second)
-                    string = (string[:i - len(first)] + insert_string +
-                              string[i + len(second) + 2:])
-                    i += len(insert_string) - len(first)
-                i += 1
-        return string
-
-    @classmethod
-    def _match_bracket(cls, string, open_bracket, close_bracket,
-                       direction='forwards'):
-        depth = 0
-        if direction == 'backwards':
-            string = string[::-1]
-        for i, c in enumerate(string):
-            if c == open_bracket:
-                depth += 1
-            elif c == close_bracket:
-                depth -= 1
-                if depth == 0:
-                    output = string[:i + 1]
-                    if direction == 'backwards':
-                        output = output[::-1]
-                    return output
-        raise NineMLMathParseError(
-            "No matching '{}' found for opening '{}' in string '{}'"
-            .format(close_bracket, open_bracket, string))
+        # After it is processed, operands should contain the parsed expression
+        # as a single item
+        return operands[0]
