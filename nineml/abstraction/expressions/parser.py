@@ -57,7 +57,7 @@ class Parser(object):
 
     def _parse_expr(self, expr):
         expr = self.escape_random_namespace(expr)
-        expr = self._escape_equalities(expr)
+        expr = self._escape_relationals(expr)
         try:
             expr = sympy_parse(
                 expr, transformations=([self] + self._sympy_transforms),
@@ -87,8 +87,8 @@ class Parser(object):
                     tokval = 'True'
                 elif tokval == 'false':
                     tokval = 'False'
-                elif tokval == '__equals__':
-                    tokval = 'Eq'
+                elif tokval.endswith('__'):
+                    tokval = tokval[:-2]
             # Handle multiple negations
             elif toknum == OP and tokval.startswith('!'):
                 # NB: Multiple !'s are grouped into the one token
@@ -206,6 +206,58 @@ class Parser(object):
     @classmethod
     def inline_random_distributions(cls):
         return cls.inline_randoms_dict.itervalues()
+
+    @classmethod
+    def _escape_relationals(cls, expr_string):
+        tokenize_re = re.compile(r'\s*(&{1,2}|\|{1,2}|<=?|>=?|==?|\(|\))\s*')
+        tokens = [t for t in tokenize_re.split(expr_string.strip()) if t]
+        operands = []
+        operators = []
+        for tok in tokens:
+            if tok == '(':
+                operators.append(tok)
+            elif tok == ')':
+                operator = operators.pop()
+                while operator != '(':
+                    arg2, arg1 = operands.pop(), operands.pop()
+                    operands.append(cls._op2func(operator, arg1, arg2))
+                    try:
+                        operator = operators.pop()
+                    except IndexError:
+                        raise NineMLMathParseError(
+                            "Unbalanced parentheses in expression: {}"
+                            .format(expr_string))
+            elif tokenize_re.match(tok):
+                operators.append(tok)
+            else:
+                operands.append(tok.strip())
+        for operator in reversed(operators):
+            if operator == '(':
+                raise NineMLMathParseError(
+                    "Unbalanced parentheses in expression: {}"
+                    .format(expr_string))
+            arg2, arg1 = operands.pop(), operands.pop()
+            operands.append(cls._op2func(operator, arg1, arg2))
+        assert len(operands) == 1
+        return operands[0]
+
+    @classmethod
+    def _op2func(cls, operator, arg1, arg2):
+        if operator.startswith('&'):
+            func = "And__({}, {})".format(arg1, arg2)
+        elif operator.startswith('|'):
+            func = "Or__({}, {})".format(arg1, arg2)
+        elif operator.startswith('='):
+            func = "Eq__({}, {})".format(arg1, arg2)
+        elif operator == '<':
+            func = "Lt__({}, {})".format(arg1, arg2)
+        elif operator == '>':
+            func = "Gt__({}, {})".format(arg1, arg2)
+        elif operator == '<=':
+            func = "Le__({}, {})".format(arg1, arg2)
+        elif operator == '>=':
+            func = "Ge__({}, {})".format(arg1, arg2)
+        return func
 
     @classmethod
     def _escape_equalities(cls, string):
