@@ -174,12 +174,13 @@ class Parser(object):
     @classmethod
     def _func_to_op(self, expr):
         """Maps functions to SymPy operators (only 'pow' at this stage)"""
-        if isinstance(expr, sympy.Function):
-            args = (self._func_to_op(a) for a in expr.args)
+        if isinstance(expr, (sympy.function.Application,
+                             sympy.relational.Relational)):
+            args = [self._func_to_op(a) for a in expr.args]
             try:
                 expr = self._func_to_op_map[type(expr)](*args)
             except KeyError:
-                expr = expr.__class__(*args)
+                expr = type(expr)(*args)
         return expr
 
     @classmethod
@@ -220,15 +221,15 @@ class Parser(object):
         operators = []  # stack (in SY algorithm terminology)
         operands = []  # output stream
         to_parse = [False]  # whether the current parenthesis should be parsed
-        num_to_concat = [0]  # num. of operands concat when not parsing
+        num_args = [0]  # num. of operands concat when not parsing
         for tok in tokens:
             if open_paren_re.match(tok):
                 operators.append(tok)
                 to_parse.append(False)
-                num_to_concat.append(0)
+                num_args.append(0)
             elif tok == ')':
                 operator = operators.pop()
-                k = num_to_concat.pop()
+                nargs = num_args.pop()
                 if to_parse.pop():
                     arg2, arg1 = operands.pop(), operands.pop()
                     operands.append(cls._op2func(operator, arg1, arg2))
@@ -239,16 +240,16 @@ class Parser(object):
                             "Unbalanced parentheses in expression: {}"
                             .format(expr_string))
                 else:
-                    operand = ''.join(operands[-k:])
-                    operands = operands[:-k]
+                    operand = ''.join(operands[-nargs:])
+                    operands = operands[:-nargs]
                     operands.append(operator + operand + tok)
-                    num_to_concat[-1] += 1
+                    num_args[-1] += 1
             elif tokenize_re.match(tok):
                 operators.append(tok)
                 to_parse[-1] = True  # parse the last set of parenthesis
             else:
                 operands.append(tok)
-                num_to_concat[-1] += 1
+                num_args[-1] += 1
         for operator in reversed(operators):
             if operator == '(':
                 raise NineMLMathParseError(
