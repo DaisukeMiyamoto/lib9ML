@@ -9,6 +9,7 @@ from itertools import chain
 from copy import deepcopy
 import sympy
 from sympy.printing import ccode
+from sympy.logic.boolalg import BooleanTrue, BooleanFalse
 import re
 # import math_namespace
 from nineml.exceptions import NineMLRuntimeError
@@ -170,7 +171,8 @@ class Expression(object):
         """ Returns a python callable which evaluates the expression in
         namespace and returns the result """
         def nineml_expression(**kwargs):
-            if isinstance(self.rhs, (bool, int, float)):
+            if isinstance(self.rhs, (bool, int, float, BooleanTrue,
+                                     BooleanFalse)):
                 val = self.rhs
             else:
                 if self.rhs.is_Boolean:
@@ -187,10 +189,11 @@ class Expression(object):
                         val = self.rhs.evalf(subs=kwargs)
                     except Exception:
                         raise NineMLRuntimeError(
-                            "Incorrect arguments provided to expression ('{}')"
-                            ": '{}'\n".format(
-                                "', '".join(self.rhs_symbol_names),
-                                "', '".join(kwargs.keys())))
+                            "Incorrect arguments provided to expression '{}'"
+                            ": '{}' (expected '{}')\n".format(
+                                self.rhs,
+                                "', '".join(kwargs.keys()),
+                                "', '".join(self.rhs_symbol_names)))
                     try:
                         val = float(val)
                     except TypeError:

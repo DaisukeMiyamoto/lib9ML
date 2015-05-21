@@ -30,6 +30,13 @@ class Parser(object):
     _match_first_re = re.compile(r'((?:-)?(?:\w+|[\d\.]+) *)$')
     _match_second_re = re.compile(r' *(?:-)?[\w\d\.]+')
     _sympy_transforms = list(standard_transformations) + [convert_xor]
+    _precedence = {'&&': 2, '&': 2, '|': 3, '||': 3, '>=': 1, '>': 1,
+                   '<': 1, '<=': 1, '==': 1, '=': 1}
+    # Matches logic and relational expressions, as well as parens and funcname(
+    _tokenize_logic_re = re.compile(r'\s*(&{1,2}|\|{1,2}|<=?|>=?|==?|'
+                                    r'(?:\w+|!|~)?\s*\(|\))\s*')
+    # Matches function names+plus opening paren and just opening paren
+    _open_paren_or_func_re = re.compile(r'(?:\w+|!|~)?\s*\(')
     inline_randoms_dict = {
         'random_uniform_': sympy.Function('random_uniform_'),
         'random_binomial_': sympy.Function('random_binomial_'),
@@ -225,8 +232,12 @@ class Parser(object):
         # Splits and throws away empty tokens (between parens and operators)
         # and encloses the whole expression in parens
         tokens = (['('] +
-                  [t for t in tokenize_re.split(expr_string.strip()) if t] +
-                  [')'])
+                  [t for t in cls._tokenize_logic_re.split(expr_string.strip())
+                   if t] + [')'])
+        if len([1 for t in tokens
+                if t.strip().endswith('(')]) != tokens.count(')'):
+            raise NineMLMathParseError(
+                "Unbalanced parentheses in expression: {}".format(expr_string))
         tokens = tokens
         operators = []  # stack (in SY algorithm terminology)
         operands = []  # output stream
@@ -251,25 +262,34 @@ class Parser(object):
                     operands = operands[:-n] + [''.join(operands[-n:])]
                 # If parens enclosed relat/logic (i.e. '&', '|', '<', '>', etc)
                 if is_relational.pop():
+                    # Get all the operators within the enclosing parens.
+                    # Need to sort by order of precedence
                     try:
-                        # Get all the operators within the enclosing parens.
-                        # Need to sort by order of precedence
-                        i = -(operators[::-1].index('(') + 1)
-                        # Get lists of operators and operands at this level
-                        # (i.e. after the last left paren)
-                        level_operators = operators[(i + 1):]
-                        level_operands = operands[i:]
-                        # Pop these operators and operands off the list
-                        # (along with the paren)
-                        operators = operators[:i]
-                        operands = operands[:i]
+                        # Get index of last open paren
+                        i = -1
+                        while not open_paren_re.match(operators[i]):
+                            i -= 1
                     except IndexError:
                         raise NineMLMathParseError(
                             "Unbalanced parentheses in expression: {}"
                             .format(expr_string))
+                    # Get lists of operators and operands at this level
+                    # (i.e. after the last left paren)
+                    level_operators = operators[(i + 1):]
+                    level_operands = operands[i:]
+                    # Pop these operators and operands off the list
+                    # (along with the paren/function-call)
+                    open_paren = operators[i]
+                    operators = operators[:i]
+                    operands = operands[:i]
                     while level_operators:
-                        operator = level_operators.pop()
-                        arg2, arg1 = level_operands.pop(), level_operands.pop()
+                        # Sort in order of precedence
+                        prec = [cls._precedence[o] for o in level_operators]
+                        i = sorted(range(len(prec)), key=prec.__getitem__)[0]
+                        # Pop first operator
+                        operator = level_operators.pop(i)
+                        arg1, arg2 = (level_operands.pop(i),
+                                      level_operands.pop(i))
                         if operator.startswith('&'):
                             func = "And__({}, {})".format(arg1, arg2)
                         elif operator.startswith('|'):
@@ -286,20 +306,33 @@ class Parser(object):
                             func = "Ge__({}, {})".format(arg1, arg2)
                         else:
                             assert False
-                        level_operands.append(func)
-                    operands.append(level_operands[0])
+                        level_operands.insert(i, func)
+                    new_operand = level_operands[0]
+                    if open_paren != '(':  # Function/logical negation
+                        new_operand = open_paren + new_operand + ')'
+                    operands.append(new_operand)
                 # If parens enclosed something else
                 else:
-                    # Apply the function/parens to the last operand
-                    operands[-1] = operators.pop() + operands[-1] + ')'
-                    num_args[-1] += 1
+                    try:
+                        # Apply the function/parens to the last operand
+                        operands[-1] = operators.pop() + operands[-1] + ')'
+                    except IndexError:
+                        raise NineMLMathParseError(
+                            "Unbalanced parentheses in expression: {}"
+                            .format(expr_string))
+                num_args[-1] += 1
             # If the token is one of ('&', '|', '<', '>', '<=', '>=' or '==')
             elif tokenize_re.match(tok):
                 operators.append(tok)
                 is_relational[-1] = True  # parse the last set of parenthesis
                 # Check if there are more than one LHS sub-expr. to concatenate
                 n = num_args[-1]
-                if n > 1:
+                if n == 0:
+                    raise NineMLMathParseError(
+                        "Logical/relational operator directly after a "
+                        "parenthesis or start of expression: {}"
+                        .format(expr_string))
+                elif n > 1:
                     operands = operands[:-n] + [''.join(operands[-n:])]
                 num_args[-1] = 0
             # If the token is an atom or a subexpr not containing any

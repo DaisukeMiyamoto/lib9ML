@@ -140,15 +140,14 @@ class OnCondition_test(unittest.TestCase):
 
     def test_trigger(self):
 
-        invalid_triggers = ['true(',
-                            'V < (V+10',
-                            'V (< V+10)',
-                            'V (< V+10)',
-                            '1 / ( 1 + mg_conc * eta *  exp (( -1 * gamma*V))'
-                            '1..0'
-                            '..0']
-        for tr in invalid_triggers:
-            self.assertRaises(NineMLMathParseError, OnCondition, tr)
+        self.assertRaises(NineMLMathParseError, OnCondition, 'V (< V+10)')
+        self.assertRaises(NineMLMathParseError, OnCondition, 'V < (V+10')
+        self.assertRaises(NineMLMathParseError, OnCondition, 'true(')
+        self.assertRaises(
+            NineMLMathParseError, OnCondition,
+            '1 / ( 1 + mg_conc * eta *  exp (( -1 * gamma*V))')
+        self.assertRaises(NineMLMathParseError, OnCondition, '1..0')
+        self.assertRaises(NineMLMathParseError, OnCondition, '..0')
 
         # Test Come Conditions:
         namespace = {
