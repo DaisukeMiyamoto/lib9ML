@@ -38,6 +38,7 @@ class Parser(object):
     _sympy_transforms = list(standard_transformations) + [convert_xor]
     _precedence = {'&&': 2, '&': 2, '|': 3, '||': 3, '>=': 1, '>': 1,
                    '<': 1, '<=': 1, '==': 1, '=': 1}
+    _whitespace_re = re.compile(r'\s+')
     inline_randoms_dict = {
         'random_uniform_': sympy.Function('random_uniform_'),
         'random_binomial_': sympy.Function('random_binomial_'),
@@ -64,6 +65,8 @@ class Parser(object):
         return expr
 
     def _parse_expr(self, expr):
+        # Strip non-space whitespace
+        expr = self._whitespace_re.sub(' ', expr)
         expr = self.escape_random_namespace(expr)
         if self._logic_relation_re.search(expr):
             expr = self._parse_relationals(expr)
