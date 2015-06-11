@@ -26,6 +26,7 @@ class Parser(object):
     _escape_random_re = re.compile(r'(?<!\w)random\.(\w+)(?!\w)')
     _unescape_random_re = re.compile(r'(?<!\w)random_(\w+)_(?!\w)')
     _sympy_transforms = list(standard_transformations) + [convert_xor]
+    _whitespace_re = re.compile(r'\s+')
     inline_randoms_dict = {
         'random_uniform_': sympy.Function('random_uniform_'),
         'random_binomial_': sympy.Function('random_binomial_'),
@@ -41,6 +42,8 @@ class Parser(object):
                 self._check_valid_funcs(expr)
             elif isinstance(expr, basestring):
                 try:
+                    # Strip non-space whitespace
+                    expr = self._whitespace_re.sub(' ', expr)
                     expr = self.escape_random_namespace(expr)
                     expr = sympy_parse(
                         expr, transformations=[self] + self._sympy_transforms,
