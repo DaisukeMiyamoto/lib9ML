@@ -71,7 +71,8 @@ class ComponentClassXMLLoader(object):
         return mblock
 
     def load_mathml(self, mathml):
-        raise NotImplementedError
+        raise NotImplementedError("MathML is not currently supported but will "
+                                  "be in future versions")
 
     def _load_blocks(self, element, block_names):
         """
